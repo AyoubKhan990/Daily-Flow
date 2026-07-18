@@ -1,0 +1,6 @@
+{
+  "name": "DailyFlow",
+  "description": "A premium, production-ready personal task management and productivity dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
