@@ -25,6 +25,11 @@ export const users = pgTable('users', {
   dailyPlanningReminder: text('daily_planning_reminder').default('08:00'), // HH:MM or 'none'
   endOfDayReviewReminder: text('end_of_day_review_reminder').default('18:00'), // HH:MM or 'none'
   
+  // Upcoming Tasks Email Settings
+  upcomingTasksEmailEnabled: boolean('upcoming_tasks_email_enabled').default(false),
+  upcomingTasksEmailAddress: text('upcoming_tasks_email_address'),
+  upcomingTasksEmailTime: text('upcoming_tasks_email_time').default('09:00'), // HH:MM
+  
   // Admin & Team Roles
   role: text('role').default('member').notNull(), // 'admin', 'member'
   adminId: integer('admin_id'), // References users.id (the admin/manager)
@@ -186,6 +191,19 @@ export const templateTasks = pgTable('template_tasks', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+// 11. Email Logs Table
+export const emailLogs = pgTable('email_logs', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id')
+    .references(() => users.id, { onDelete: 'cascade' })
+    .notNull(),
+  recipientEmail: text('recipient_email').notNull(),
+  subject: text('subject').notNull(),
+  content: text('content').notNull(),
+  sentAt: timestamp('sent_at').defaultNow().notNull(),
+  status: text('status').default('sent').notNull(), // 'sent', 'failed', 'simulated'
+});
+
 // Relations Definitions
 export const usersRelations = relations(users, ({ many }) => ({
   projects: many(projects),
@@ -195,6 +213,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   dailyReviews: many(dailyReviews),
   focusSessions: many(focusSessions),
   templates: many(templates),
+  emailLogs: many(emailLogs),
 }));
 
 export const projectsRelations = relations(projects, ({ one, many }) => ({
@@ -240,4 +259,8 @@ export const templatesRelations = relations(templates, ({ one, many }) => ({
 
 export const templateTasksRelations = relations(templateTasks, ({ one }) => ({
   template: one(templates, { fields: [templateTasks.templateId], references: [templates.id] }),
+}));
+
+export const emailLogsRelations = relations(emailLogs, ({ one }) => ({
+  user: one(users, { fields: [emailLogs.userId], references: [users.id] }),
 }));

@@ -14,6 +14,9 @@ export interface UserProfile {
   defaultReminder: string;
   dailyPlanningReminder: string;
   endOfDayReviewReminder: string;
+  upcomingTasksEmailEnabled: boolean;
+  upcomingTasksEmailAddress: string | null;
+  upcomingTasksEmailTime: string;
   role: string;
   adminId: number | null;
   createdAt: string;
@@ -132,4 +135,14 @@ export interface TemplateTask {
   estDuration: number;
   checklist: Subtask[];
   createdAt: string;
+}
+
+export interface EmailLog {
+  id: number;
+  userId: number;
+  recipientEmail: string;
+  subject: string;
+  content: string;
+  sentAt: string;
+  status: 'sent' | 'failed' | 'simulated';
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Save, Sparkles, Sliders, Shield, User, AlertCircle } from 'lucide-react';
+import { Settings, Save, Sparkles, Sliders, Shield, User, AlertCircle, Globe } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.tsx';
 
 interface SettingsViewProps {
@@ -11,6 +11,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 }) => {
   const { user, profile, token } = useAuth();
 
+  const [name, setName] = useState('');
+  const [timezone, setTimezone] = useState('UTC');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [startOfWeek, setStartOfWeek] = useState<'monday' | 'sunday'>('monday');
   const [defaultPriority, setDefaultPriority] = useState<'low' | 'medium' | 'high' | 'urgent'>('medium');
@@ -25,6 +27,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // Prefill settings
   useEffect(() => {
     if (profile) {
+      setName(profile.name || '');
+      setTimezone(profile.timezone || 'UTC');
       setTheme(profile.theme as any || 'light');
       setStartOfWeek(profile.startOfWeek as any || 'monday');
       setDefaultPriority(profile.defaultPriority as any || 'medium');
@@ -42,6 +46,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setSuccess(null);
 
     const payload = {
+      name,
+      timezone,
       theme,
       startOfWeek,
       defaultPriority,
@@ -51,7 +57,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     };
 
     try {
-      const res = await fetch('/api/profile', {
+      const res = await fetch('/api/user/profile', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -109,14 +115,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         {/* User profile card */}
         <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 p-5 rounded-2xl flex items-center gap-4">
           <div className="w-12 h-12 bg-indigo-500 rounded-full flex items-center justify-center text-white font-bold text-lg">
-            {user?.displayName ? user.displayName.charAt(0).toUpperCase() : user?.email?.charAt(0).toUpperCase() || 'U'}
+            {name ? name.charAt(0).toUpperCase() : user?.email?.charAt(0).toUpperCase() || 'U'}
           </div>
-          <div>
-            <h3 className="font-semibold text-zinc-900 dark:text-white flex items-center gap-1.5 text-sm">
-              <User className="w-4 h-4 text-zinc-400" />
-              {user?.displayName || 'DailyFlow User'}
-            </h3>
-            <p className="text-xs text-zinc-400 mt-0.5">{user?.email}</p>
+          <div className="flex-1 min-w-0">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Your Display Name</label>
+              <input 
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="DailyFlow User"
+                className="w-full max-w-xs px-3 py-1 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs font-semibold text-zinc-900 dark:text-white focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+            <p className="text-xs text-zinc-400 mt-1.5">{user?.email}</p>
           </div>
         </div>
 
@@ -128,6 +140,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             
+            {/* Timezone selection */}
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-zinc-500 flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5 text-zinc-400" />
+                Timezone Rule
+              </label>
+              <select
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+                className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm"
+              >
+                <option value="UTC">UTC / Coordinated Universal Time</option>
+                <option value="Asia/Karachi">Asia/Karachi (GMT+5)</option>
+                <option value="Asia/Kolkata">Asia/Kolkata (GMT+5:30)</option>
+                <option value="Asia/Dubai">Asia/Dubai (GMT+4)</option>
+                <option value="Europe/London">Europe/London (GMT+1 / BST)</option>
+                <option value="America/New_York">America/New_York (EST/EDT)</option>
+                <option value="America/Chicago">America/Chicago (CST/CDT)</option>
+                <option value="America/Los_Angeles">America/Los_Angeles (PST/PDT)</option>
+              </select>
+            </div>
+
             {/* Theme selection */}
             <div className="space-y-1">
               <label className="text-xs font-semibold text-zinc-500">Aesthetic UI Theme</label>
@@ -222,7 +256,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           id="save-settings-btn"
           type="submit"
           disabled={loading}
-          className="w-full max-w-[200px] py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs"
+          className="w-full max-w-[200px] py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
         >
           <Save className="w-4 h-4" />
           {loading ? 'Updating...' : 'Save Settings'}

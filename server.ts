@@ -12,9 +12,10 @@ import {
   dailyReviews,
   focusSessions,
   templates,
-  templateTasks
+  templateTasks,
+  emailLogs
 } from "./src/db/schema.ts";
-import { eq, and, or, gte, lte, desc, asc, not } from "drizzle-orm";
+import { eq, and, or, gte, lte, desc, asc, not, like } from "drizzle-orm";
 import { requireAuth, AuthRequest } from "./src/middleware/auth.ts";
 import { GoogleGenAI } from "@google/genai";
 import * as dotenv from "dotenv";
@@ -146,6 +147,9 @@ app.put("/api/user/profile", requireAuth, syncUser, async (req: AuthRequest, res
       defaultReminder,
       dailyPlanningReminder,
       endOfDayReviewReminder,
+      upcomingTasksEmailEnabled,
+      upcomingTasksEmailAddress,
+      upcomingTasksEmailTime,
     } = req.body;
 
     const updated = await db.update(users)
@@ -162,6 +166,9 @@ app.put("/api/user/profile", requireAuth, syncUser, async (req: AuthRequest, res
         defaultReminder,
         dailyPlanningReminder,
         endOfDayReviewReminder,
+        upcomingTasksEmailEnabled,
+        upcomingTasksEmailAddress,
+        upcomingTasksEmailTime,
       })
       .where(eq(users.id, req.dbUser!.id))
       .returning();
@@ -1146,6 +1153,270 @@ app.get("/api/streak", requireAuth, syncUser, async (req: AuthRequest, res) => {
     res.status(500).json({ error: "Failed to calculate streaks." });
   }
 });
+
+// ==========================================
+// 8. EMAIL NOTIFICATIONS & REMINDERS
+// ==========================================
+import nodemailer from "nodemailer";
+
+async function sendDailySummaryEmail(dbUser: any, userTasks: any[]) {
+  const recipient = dbUser.upcomingTasksEmailAddress || dbUser.email;
+  const todayStr = new Date().toISOString().slice(0, 10);
+  
+  const subject = `🌅 Aaj ke Tasks Summary - ${todayStr}`;
+  
+  let taskListHtml = "";
+  if (userTasks.length === 0) {
+    taskListHtml = `
+      <div style="padding: 15px; background-color: #f3f4f6; border-radius: 8px; text-align: center; color: #4b5563;">
+        <p style="font-weight: bold; margin: 0;">Aap ka aaj ka timeline bilkul clear hai! ✨</p>
+        <p style="margin: 5px 0 0 0; font-size: 13px;">Koi pending tasks nahi hain. Naye tasks add karne ke liye app check karein.</p>
+      </div>
+    `;
+  } else {
+    taskListHtml = `
+      <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
+        <thead>
+          <tr style="background-color: #4f46e5; color: white; text-align: left;">
+            <th style="padding: 10px; border-radius: 4px 0 0 4px; font-size: 13px;">Task Title</th>
+            <th style="padding: 10px; font-size: 13px;">Priority</th>
+            <th style="padding: 10px; border-radius: 0 4px 4px 0; font-size: 13px;">Time</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+    userTasks.forEach((t: any) => {
+      const priorityColors: Record<string, string> = {
+        urgent: "#dc2626",
+        high: "#d97706",
+        medium: "#2563eb",
+        low: "#6b7280",
+      };
+      const priorityColor = priorityColors[t.priority] || "#4b5563";
+      taskListHtml += `
+        <tr style="border-bottom: 1px solid #e5e7eb;">
+          <td style="padding: 12px 10px; font-size: 13px;">
+            <strong style="color: #1f2937;">${t.title}</strong>
+            ${t.description ? `<p style="margin: 3px 0 0 0; font-size: 12px; color: #6b7280;">${t.description}</p>` : ""}
+          </td>
+          <td style="padding: 12px 10px; font-size: 13px;">
+            <span style="color: white; background-color: ${priorityColor}; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: bold; text-transform: uppercase;">
+              ${t.priority}
+            </span>
+          </td>
+          <td style="padding: 12px 10px; color: #4b5563; font-size: 12px;">
+            ${t.startTime || "All Day"}
+          </td>
+        </tr>
+      `;
+    });
+    taskListHtml += `
+        </tbody>
+      </table>
+    `;
+  }
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Daily Tasks Summary</title>
+    </head>
+    <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f9fafb; margin: 0; padding: 20px; color: #111827;">
+      <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; border: 1px solid #e5e7eb; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+        <!-- Header -->
+        <div style="background: linear-gradient(135deg, #4f46e5 0%, #312e81 100%); padding: 30px; text-align: center; color: white;">
+          <span style="font-size: 32px;">🌅</span>
+          <h1 style="margin: 10px 0 0 0; font-size: 24px; font-weight: 800;">Daily Tasks Digest</h1>
+          <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">Aap ka aaj ka schedule</p>
+        </div>
+        
+        <!-- Content -->
+        <div style="padding: 30px;">
+          <p style="font-size: 16px; line-height: 1.5; margin: 0 0 20px 0; color: #374151;">
+            Assalam-o-Alaikum / Hello, <strong>${dbUser.name || "User"}</strong>!
+          </p>
+          <p style="font-size: 15px; line-height: 1.6; color: #4b5563; margin: 0 0 20px 0;">
+            Aap ke aaj ke tareekh (<strong>${todayStr}</strong>) ke scheduled tasks niche diye gaye hain. On that day, these tasks appear on your <strong>Today's Timeline</strong> panel so you can track them easily!
+          </p>
+          
+          ${taskListHtml}
+          
+          <div style="margin-top: 30px; padding: 15px; border-left: 4px solid #4f46e5; background-color: #f5f3ff; border-radius: 0 8px 8px 0;">
+            <p style="margin: 0; font-size: 13px; color: #4f46e5; font-weight: bold;">💡 Tip:</p>
+            <p style="margin: 5px 0 0 0; font-size: 12px; color: #5b21b6; line-height: 1.5;">
+              Agar aap aaj din mein naye tasks add karenge, to woh bhi automatic app ke "Today" screen mein in scheduled tasks ke sath shamil ho jayenge!
+            </p>
+          </div>
+          
+          <div style="text-align: center; margin-top: 35px;">
+            <a href="${process.env.DEVELOPMENT_APP_URL || "http://localhost:3000"}" style="display: inline-block; padding: 12px 24px; background-color: #4f46e5; color: white; text-decoration: none; font-weight: bold; font-size: 14px; border-radius: 10px; box-shadow: 0 2px 4px rgba(79, 70, 229, 0.25);">
+              Open DailyFlow Workspace
+            </a>
+          </div>
+        </div>
+        
+        <!-- Footer -->
+        <div style="background-color: #f9fafb; padding: 20px; border-top: 1px solid #e5e7eb; text-align: center; font-size: 12px; color: #9ca3af;">
+          <p style="margin: 0;">Sent by DailyFlow Tasks Reminder Engine</p>
+          <p style="margin: 5px 0 0 0;">Use Settings to configure or disable these daily alerts.</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  let sentStatus = "simulated" as "sent" | "failed" | "simulated";
+  let statusMessage = "Email simulated successfully (SMTP not configured)";
+
+  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: parseInt(process.env.SMTP_PORT || "587"),
+        secure: process.env.SMTP_SECURE === "true",
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS,
+        },
+      });
+
+      await transporter.sendMail({
+        from: `"${process.env.SMTP_FROM_NAME || "DailyFlow"}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+        to: recipient,
+        subject: subject,
+        html: htmlContent,
+      });
+
+      sentStatus = "sent";
+      statusMessage = "Email sent successfully via SMTP";
+    } catch (err: any) {
+      console.error("Nodemailer SMTP failed:", err);
+      sentStatus = "failed";
+      statusMessage = `Failed to send email: ${err.message}`;
+    }
+  }
+
+  // Save to email logs in DB
+  const [log] = await db.insert(emailLogs).values({
+    userId: dbUser.id,
+    recipientEmail: recipient,
+    subject: subject,
+    content: htmlContent,
+    status: sentStatus,
+  }).returning();
+
+  return { log, statusMessage, sentStatus };
+}
+
+// Route to get email notification history
+app.get("/api/user/emails", requireAuth, syncUser, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.dbUser!.id;
+    const logs = await db.select().from(emailLogs)
+      .where(eq(emailLogs.userId, userId))
+      .orderBy(desc(emailLogs.sentAt));
+    res.json(logs);
+  } catch (error) {
+    console.error("Failed to fetch email logs:", error);
+    res.status(500).json({ error: "Failed to fetch email logs." });
+  }
+});
+
+// Route to trigger a test summary email immediately
+app.post("/api/user/emails/test-trigger", requireAuth, syncUser, async (req: AuthRequest, res) => {
+  try {
+    const dbUser = req.dbUser!;
+    const userId = dbUser.id;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    
+    // Fetch all user's tasks scheduled for today
+    const userTasks = await db.select().from(tasks).where(
+      and(
+        eq(tasks.userId, userId),
+        eq(tasks.date, todayStr),
+        eq(tasks.isArchived, false)
+      )
+    );
+
+    const result = await sendDailySummaryEmail(dbUser, userTasks);
+    res.json({
+      success: true,
+      statusMessage: result.statusMessage,
+      sentStatus: result.sentStatus,
+      log: result.log
+    });
+  } catch (error: any) {
+    console.error("Test trigger email failed:", error);
+    res.status(500).json({ error: "Failed to trigger test email: " + error.message });
+  }
+});
+
+// Background scheduler to check and send 9:00 AM emails every minute
+const runDailyEmailScheduler = async () => {
+  setInterval(async () => {
+    try {
+      const enabledUsers = await db.select().from(users).where(eq(users.upcomingTasksEmailEnabled, true));
+      
+      for (const dbUser of enabledUsers) {
+        try {
+          const userTimezone = dbUser.timezone || "UTC";
+          let localTimeStr;
+          try {
+            localTimeStr = new Date().toLocaleString("en-US", { timeZone: userTimezone });
+          } catch (tzErr) {
+            localTimeStr = new Date().toLocaleString("en-US", { timeZone: "UTC" });
+          }
+          
+          const localTime = new Date(localTimeStr);
+          const localHour = localTime.getHours();
+          const localMinute = localTime.getMinutes();
+          
+          const localDateStr = localTime.getFullYear() + "-" + 
+                               String(localTime.getMonth() + 1).padStart(2, '0') + "-" + 
+                               String(localTime.getDate()).padStart(2, '0');
+
+          const targetTime = dbUser.upcomingTasksEmailTime || "09:00";
+          const [targetHourStr, targetMinuteStr] = targetTime.split(":");
+          const targetHour = parseInt(targetHourStr || "9");
+          const targetMinute = parseInt(targetMinuteStr || "0");
+
+          if (localHour === targetHour && localMinute === targetMinute) {
+            // Check if we already sent an email summary for this local date
+            const existingLogs = await db.select().from(emailLogs).where(
+              and(
+                eq(emailLogs.userId, dbUser.id),
+                like(emailLogs.subject, `%${localDateStr}%`)
+              )
+            );
+
+            if (existingLogs.length === 0) {
+              console.log(`[Scheduler] Triggering daily tasks digest for user ${dbUser.email} (Timezone: ${userTimezone}, local date: ${localDateStr})`);
+              
+              const userTasks = await db.select().from(tasks).where(
+                and(
+                  eq(tasks.userId, dbUser.id),
+                  eq(tasks.date, localDateStr),
+                  eq(tasks.isArchived, false)
+                )
+              );
+
+              await sendDailySummaryEmail(dbUser, userTasks);
+            }
+          }
+        } catch (userErr) {
+          console.error(`[Scheduler] Error processing user ${dbUser.email}:`, userErr);
+        }
+      }
+    } catch (err) {
+      console.error("[Scheduler] Error running daily email scheduler tick:", err);
+    }
+  }, 60000); // run every 60 seconds
+};
+
+// Start the scheduler on boot
+runDailyEmailScheduler();
 
 // ==========================================
 // VITE OR STATIC SERVING MIDDLEWARE
