@@ -36,6 +36,35 @@ interface TeamMember {
   tasks: Task[];
 }
 
+interface OwnerUser {
+  id: number;
+  uid: string;
+  name: string | null;
+  email: string;
+  photoUrl: string | null;
+  role: string;
+  adminId: number | null;
+  adminEmail: string | null;
+  createdAt: string;
+  teamCount: number;
+  metrics: {
+    total: number;
+    completed: number;
+    pending: number;
+  };
+}
+
+interface OwnerDashboard {
+  users: OwnerUser[];
+  totals: {
+    users: number;
+    tasks: number;
+    admins: number;
+    members: number;
+    rootAdmins: number;
+  };
+}
+
 export const TeamView: React.FC = () => {
   const { profile, token, refreshProfile } = useAuth();
   
@@ -52,6 +81,13 @@ export const TeamView: React.FC = () => {
   const [expandedMemberId, setExpandedMemberId] = useState<number | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+
+  // Owner Dashboard (Root Admin) states
+  const [ownerData, setOwnerData] = useState<OwnerDashboard | null>(null);
+  const [loadingOwner, setLoadingOwner] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [roleFilter, setRoleFilter] = useState<string>('all');
+  const [updatingUserRole, setUpdatingUserRole] = useState<number | null>(null);
 
   // Parse invite code from URL if present
   useEffect(() => {
@@ -89,11 +125,70 @@ export const TeamView: React.FC = () => {
     }
   };
 
+  // Fetch owner dashboard data if user is root_admin
+  const fetchOwnerDashboard = async () => {
+    if (!token || profile?.role !== 'root_admin') return;
+    setLoadingOwner(true);
+    try {
+      const res = await fetch('/api/owner/dashboard', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setOwnerData(data);
+      } else {
+        const errData = await res.json();
+        setError(errData.error || 'Failed to load owner dashboard.');
+      }
+    } catch (err) {
+      console.error('Fetch owner dashboard error:', err);
+      setError('Connection error loading owner dashboard.');
+    } finally {
+      setLoadingOwner(false);
+    }
+  };
+
   useEffect(() => {
     if (profile?.role === 'admin') {
       fetchTeamMembers();
+    } else if (profile?.role === 'root_admin') {
+      fetchOwnerDashboard();
     }
   }, [profile?.role, token]);
+
+  // Handle owner update user role
+  const handleUpdateUserRole = async (targetUserId: number, newRole: string) => {
+    if (!token) return;
+    setUpdatingUserRole(targetUserId);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await fetch(`/api/owner/users/${targetUserId}/role`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ role: newRole })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSuccess('User role updated successfully!');
+        await fetchOwnerDashboard();
+        if (targetUserId === profile?.id) {
+          await refreshProfile();
+        }
+      } else {
+        setError(data.error || 'Failed to update user role.');
+      }
+    } catch (err) {
+      setError('Connection failed to update role.');
+    } finally {
+      setUpdatingUserRole(null);
+    }
+  };
 
   // Handle Become Admin
   const handleBecomeAdmin = async () => {
@@ -240,6 +335,238 @@ export const TeamView: React.FC = () => {
   // Main UI render logic based on roles
   const renderContent = () => {
     if (!profile) return null;
+
+    // --- CASE S: USER IS ROOT ADMIN (Application Owner) ---
+    if (profile.role === 'root_admin') {
+      const filteredUsers = (ownerData?.users || []).filter(u => {
+        const matchesSearch = (u.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
+                              u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                              u.uid.toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesRole = roleFilter === 'all' || u.role === roleFilter;
+        return matchesSearch && matchesRole;
+      });
+
+      return (
+        <div className="space-y-8 animate-fade-in text-slate-800 dark:text-slate-100">
+          {/* Header Summary for Application Owner */}
+          <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white rounded-3xl p-6 md:p-8 shadow-xl relative overflow-hidden">
+            <div className="absolute right-0 bottom-0 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl -mr-16 -mb-16 pointer-events-none" />
+            
+            <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+              <div>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-500/25 text-indigo-200 border border-indigo-400/20 mb-3">
+                  <ShieldAlert className="w-3.5 h-3.5" /> Root Owner Workspace
+                </span>
+                <h1 className="text-3xl font-extrabold tracking-tight">Root Administrator Control Hub</h1>
+                <p className="text-indigo-200/80 text-xs mt-1.5 max-w-xl">
+                  You are the ultimate platform owner. Oversee all registers, monitor team activity aggregates, and direct administrative role promotions.
+                </p>
+              </div>
+              <div className="bg-white/10 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-white/10 text-xs font-mono">
+                System: <span className="text-indigo-300 font-bold">ONLINE</span>
+              </div>
+            </div>
+
+            {/* Totals cards inside the header */}
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mt-8 pt-6 border-t border-white/10">
+              <div className="bg-white/5 backdrop-blur-xs p-4 rounded-2xl border border-white/5">
+                <p className="text-[10px] text-indigo-200 font-bold uppercase tracking-wider">Total Users</p>
+                <p className="text-2xl font-bold mt-1 text-white">{ownerData?.totals.users ?? '...'}</p>
+              </div>
+              <div className="bg-white/5 backdrop-blur-xs p-4 rounded-2xl border border-white/5">
+                <p className="text-[10px] text-indigo-200 font-bold uppercase tracking-wider">Total Tasks</p>
+                <p className="text-2xl font-bold mt-1 text-white">{ownerData?.totals.tasks ?? '...'}</p>
+              </div>
+              <div className="bg-white/5 backdrop-blur-xs p-4 rounded-2xl border border-white/5">
+                <p className="text-[10px] text-indigo-200 font-bold uppercase tracking-wider">Team Admins (Managers)</p>
+                <p className="text-2xl font-bold mt-1 text-indigo-300">{ownerData?.totals.admins ?? '...'}</p>
+              </div>
+              <div className="bg-white/5 backdrop-blur-xs p-4 rounded-2xl border border-white/5">
+                <p className="text-[10px] text-indigo-200 font-bold uppercase tracking-wider">Members/Staff</p>
+                <p className="text-2xl font-bold mt-1 text-emerald-400">{ownerData?.totals.members ?? '...'}</p>
+              </div>
+              <div className="bg-white/5 backdrop-blur-xs p-4 rounded-2xl border border-white/5 col-span-2 lg:col-span-1">
+                <p className="text-[10px] text-indigo-200 font-bold uppercase tracking-wider">Root Admins</p>
+                <p className="text-2xl font-bold mt-1 text-amber-400">{ownerData?.totals.rootAdmins ?? '...'}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* User management control list */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-xs space-y-6">
+            <div className="flex flex-col lg:flex-row justify-between lg:items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
+              <div>
+                <h2 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                  <Users className="w-5 h-5 text-indigo-500" />
+                  User & Team Management ({filteredUsers.length} users)
+                </h2>
+                <p className="text-xs text-slate-400 dark:text-slate-400 mt-1">
+                  Promote users to team admins so they can create/manage their own isolated teams, or manage root access.
+                </p>
+              </div>
+
+              {/* Filters and search */}
+              <div className="flex flex-wrap items-center gap-3">
+                <input
+                  type="text"
+                  placeholder="Search by name, email, UID..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="px-3.5 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-medium focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 text-slate-800 dark:text-white min-w-[200px]"
+                />
+
+                <select
+                  value={roleFilter}
+                  onChange={(e) => setRoleFilter(e.target.value)}
+                  className="px-3.5 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 text-slate-800 dark:text-white"
+                >
+                  <option value="all">All Roles</option>
+                  <option value="root_admin">Root Admin</option>
+                  <option value="admin">Team Admin</option>
+                  <option value="member">Regular Member</option>
+                </select>
+
+                <button
+                  onClick={fetchOwnerDashboard}
+                  disabled={loadingOwner}
+                  className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 font-bold text-xs rounded-xl border border-indigo-100 dark:border-indigo-800 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  Refresh Data
+                </button>
+              </div>
+            </div>
+
+            {loadingOwner ? (
+              <div className="py-20 text-center text-xs font-semibold text-slate-400">
+                <div className="w-8 h-8 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                Retrieving comprehensive system directories...
+              </div>
+            ) : filteredUsers.length === 0 ? (
+              <div className="text-center py-16 text-xs text-slate-400">
+                No users found matching your search or filters.
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border border-slate-150 dark:border-slate-800">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-150 dark:border-slate-800">
+                      <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">User Details</th>
+                      <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Join Date</th>
+                      <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Platform Role</th>
+                      <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Team Association</th>
+                      <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Task Metrics</th>
+                      <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-850">
+                    {filteredUsers.map((u) => {
+                      const isOwnerSelf = u.id === profile.id;
+                      return (
+                        <tr key={u.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-850/20 text-xs transition-colors">
+                          <td className="p-4">
+                            <div className="flex items-center gap-3">
+                              {u.photoUrl ? (
+                                <img
+                                  src={u.photoUrl}
+                                  alt={u.name || u.email}
+                                  className="w-9 h-9 rounded-full object-cover border border-slate-200 dark:border-slate-700"
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <div className="w-9 h-9 rounded-full bg-indigo-500 text-white flex items-center justify-center font-bold text-sm">
+                                  {(u.name || u.email).charAt(0).toUpperCase()}
+                                </div>
+                              )}
+                              <div>
+                                <p className="font-semibold text-slate-800 dark:text-white flex items-center gap-1">
+                                  {u.name || 'Unnamed User'}
+                                  {isOwnerSelf && (
+                                    <span className="text-[9px] bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full font-bold">You</span>
+                                  )}
+                                </p>
+                                <p className="text-[10px] text-slate-400 truncate max-w-[180px]">{u.email}</p>
+                                <p className="text-[9px] text-slate-400 font-mono">ID: {u.uid.slice(0, 8)}...</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-4 text-slate-500 dark:text-slate-400 font-medium">
+                            {new Date(u.createdAt).toLocaleDateString(undefined, {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric'
+                            })}
+                          </td>
+                          <td className="p-4">
+                            <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                              u.role === 'root_admin' 
+                                ? 'bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-200/50 dark:border-amber-900/20' 
+                                : u.role === 'admin' 
+                                ? 'bg-indigo-100 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border border-indigo-200/50 dark:border-indigo-900/20'
+                                : 'bg-slate-100 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400'
+                            }`}>
+                              {u.role === 'root_admin' ? 'Root Owner' : u.role === 'admin' ? 'Team Admin' : 'Member'}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            {u.role === 'admin' ? (
+                              <span className="text-indigo-600 dark:text-indigo-400 font-semibold bg-indigo-50/50 dark:bg-indigo-950/20 px-2 py-1 rounded-lg">
+                                Admin of <strong>{u.teamCount}</strong> members
+                              </span>
+                            ) : u.adminEmail ? (
+                              <span className="text-slate-500 dark:text-slate-400">
+                                Team of <strong>{u.adminEmail}</strong>
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 italic">None (Standalone)</span>
+                            )}
+                          </td>
+                          <td className="p-4">
+                            <div className="flex items-center gap-4 text-slate-500 dark:text-slate-400 font-semibold">
+                              <div>
+                                <span className="text-slate-400 text-[10px] uppercase font-bold block">Tasks</span>
+                                <span className="text-slate-700 dark:text-slate-200 font-bold">{u.metrics.total}</span>
+                              </div>
+                              <div className="border-l border-slate-150 dark:border-slate-850 h-6"></div>
+                              <div>
+                                <span className="text-emerald-500 text-[10px] uppercase font-bold block">Done</span>
+                                <span className="text-emerald-600 dark:text-emerald-400 font-bold">{u.metrics.completed}</span>
+                              </div>
+                              <div className="border-l border-slate-150 dark:border-slate-850 h-6"></div>
+                              <div>
+                                <span className="text-amber-500 text-[10px] uppercase font-bold block">Left</span>
+                                <span className="text-amber-600 dark:text-amber-400 font-bold">{u.metrics.pending}</span>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-4 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              {updatingUserRole === u.id ? (
+                                <span className="text-[10px] text-slate-400 italic font-medium">Updating...</span>
+                              ) : (
+                                <select
+                                  value={u.role}
+                                  onChange={(e) => handleUpdateUserRole(u.id, e.target.value)}
+                                  disabled={isOwnerSelf}
+                                  className="px-2 py-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:border-slate-300 rounded-lg text-xs font-semibold focus:outline-hidden disabled:opacity-50 text-slate-700 dark:text-slate-200 cursor-pointer"
+                                >
+                                  <option value="member">Make Member</option>
+                                  <option value="admin">Make Team Admin</option>
+                                  <option value="root_admin">Make Root Admin</option>
+                                </select>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
 
     // --- CASE A: USER IS TEAM ADMIN ---
     if (profile.role === 'admin') {

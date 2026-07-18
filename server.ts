@@ -44,6 +44,8 @@ const syncUser = async (req: AuthRequest, res: Response, next: NextFunction) => 
     const existingUsers = await db.select().from(users).where(eq(users.uid, firebaseUid)).limit(1);
     let dbUser = existingUsers[0];
 
+    const isRootAdminEmail = email.toLowerCase() === "ma27223895@gmail.com";
+
     if (!dbUser) {
       const inserted = await db.insert(users)
         .values({
@@ -51,6 +53,7 @@ const syncUser = async (req: AuthRequest, res: Response, next: NextFunction) => 
           email,
           name,
           photoUrl,
+          role: isRootAdminEmail ? "root_admin" : "member",
         })
         .onConflictDoUpdate({
           target: users.uid,
@@ -58,6 +61,13 @@ const syncUser = async (req: AuthRequest, res: Response, next: NextFunction) => 
         })
         .returning();
       dbUser = inserted[0];
+    } else if (isRootAdminEmail && dbUser.role !== "root_admin") {
+      // Force promote to root_admin
+      const updated = await db.update(users)
+        .set({ role: "root_admin" })
+        .where(eq(users.id, dbUser.id))
+        .returning();
+      dbUser = updated[0];
     }
 
     req.dbUser = dbUser;
@@ -288,6 +298,101 @@ app.get("/api/admin/team", requireAuth, syncUser, async (req: AuthRequest, res) 
   } catch (error) {
     console.error("Failed to fetch team details:", error);
     res.status(500).json({ error: "Failed to fetch team details." });
+  }
+});
+
+// ==========================================
+// 2c. ROOT ADMIN (OWNER) ROUTES
+// ==========================================
+app.get("/api/owner/dashboard", requireAuth, syncUser, async (req: AuthRequest, res) => {
+  try {
+    if (req.dbUser!.role !== "root_admin") {
+      return res.status(403).json({ error: "Forbidden: Only application owners (root admins) can view owner dashboard details." });
+    }
+
+    // Fetch all users
+    const allUsers = await db.select().from(users).orderBy(desc(users.createdAt));
+
+    // Fetch all tasks
+    const allTasks = await db.select().from(tasks).where(eq(tasks.isArchived, false));
+
+    const result = [];
+    for (const u of allUsers) {
+      const userTasks = allTasks.filter(t => t.userId === u.id);
+      const total = userTasks.length;
+      const completed = userTasks.filter(t => t.status === "completed").length;
+      const pending = total - completed;
+
+      // Count of team members if u is a team admin
+      const teamCount = allUsers.filter(usr => usr.adminId === u.id).length;
+
+      // Find admin email if u is a team member
+      let adminEmail = null;
+      if (u.adminId) {
+        const adminObj = allUsers.find(usr => usr.id === u.adminId);
+        adminEmail = adminObj ? (adminObj.name || adminObj.email) : null;
+      }
+
+      result.push({
+        id: u.id,
+        uid: u.uid,
+        name: u.name,
+        email: u.email,
+        photoUrl: u.photoUrl,
+        role: u.role,
+        adminId: u.adminId,
+        adminEmail,
+        createdAt: u.createdAt,
+        teamCount,
+        metrics: {
+          total,
+          completed,
+          pending
+        }
+      });
+    }
+
+    res.json({
+      users: result,
+      totals: {
+        users: allUsers.length,
+        tasks: allTasks.length,
+        admins: allUsers.filter(u => u.role === "admin").length,
+        members: allUsers.filter(u => u.role === "member").length,
+        rootAdmins: allUsers.filter(u => u.role === "root_admin").length,
+      }
+    });
+  } catch (error) {
+    console.error("Failed to fetch root admin dashboard details:", error);
+    res.status(500).json({ error: "Failed to fetch root admin dashboard details." });
+  }
+});
+
+app.put("/api/owner/users/:id/role", requireAuth, syncUser, async (req: AuthRequest, res) => {
+  try {
+    if (req.dbUser!.role !== "root_admin") {
+      return res.status(403).json({ error: "Forbidden: Only application owners (root admins) can modify roles." });
+    }
+
+    const targetUserId = parseInt(req.params.id);
+    const { role } = req.body;
+
+    if (role !== "root_admin" && role !== "admin" && role !== "member") {
+      return res.status(400).json({ error: "Invalid role. Must be 'root_admin', 'admin' or 'member'." });
+    }
+
+    const updated = await db.update(users)
+      .set({ role })
+      .where(eq(users.id, targetUserId))
+      .returning();
+
+    res.json({
+      success: true,
+      user: updated[0]
+    });
+  } catch (error) {
+    console.error("Failed to change user role:", error);
+    res.status(500).json({ error: "Failed to update user role." });
   }
 });
 
