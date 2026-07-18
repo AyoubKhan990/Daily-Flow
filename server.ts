@@ -154,21 +154,21 @@ app.put("/api/user/profile", requireAuth, syncUser, async (req: AuthRequest, res
 
     const updated = await db.update(users)
       .set({
-        name,
-        photoUrl,
-        timezone,
-        startOfWeek,
-        theme,
-        streakRule,
-        streakPercent,
-        defaultPriority,
-        defaultDuration,
-        defaultReminder,
-        dailyPlanningReminder,
-        endOfDayReviewReminder,
-        upcomingTasksEmailEnabled,
-        upcomingTasksEmailAddress,
-        upcomingTasksEmailTime,
+        name: name !== undefined ? name : req.dbUser!.name,
+        photoUrl: photoUrl !== undefined ? photoUrl : req.dbUser!.photoUrl,
+        timezone: timezone !== undefined ? timezone : req.dbUser!.timezone,
+        startOfWeek: startOfWeek !== undefined ? startOfWeek : req.dbUser!.startOfWeek,
+        theme: theme !== undefined ? theme : req.dbUser!.theme,
+        streakRule: streakRule !== undefined ? streakRule : req.dbUser!.streakRule,
+        streakPercent: streakPercent !== undefined ? streakPercent : req.dbUser!.streakPercent,
+        defaultPriority: defaultPriority !== undefined ? defaultPriority : req.dbUser!.defaultPriority,
+        defaultDuration: defaultDuration !== undefined ? defaultDuration : req.dbUser!.defaultDuration,
+        defaultReminder: defaultReminder !== undefined ? defaultReminder : req.dbUser!.defaultReminder,
+        dailyPlanningReminder: dailyPlanningReminder !== undefined ? dailyPlanningReminder : req.dbUser!.dailyPlanningReminder,
+        endOfDayReviewReminder: endOfDayReviewReminder !== undefined ? endOfDayReviewReminder : req.dbUser!.endOfDayReviewReminder,
+        upcomingTasksEmailEnabled: upcomingTasksEmailEnabled !== undefined ? upcomingTasksEmailEnabled : req.dbUser!.upcomingTasksEmailEnabled,
+        upcomingTasksEmailAddress: upcomingTasksEmailAddress !== undefined ? upcomingTasksEmailAddress : req.dbUser!.upcomingTasksEmailAddress,
+        upcomingTasksEmailTime: upcomingTasksEmailTime !== undefined ? upcomingTasksEmailTime : req.dbUser!.upcomingTasksEmailTime,
       })
       .where(eq(users.id, req.dbUser!.id))
       .returning();
@@ -1159,9 +1159,10 @@ app.get("/api/streak", requireAuth, syncUser, async (req: AuthRequest, res) => {
 // ==========================================
 import nodemailer from "nodemailer";
 
-async function sendDailySummaryEmail(dbUser: any, userTasks: any[]) {
+async function sendDailySummaryEmail(dbUser: any, userTasks: any[], baseUrl?: string) {
   const recipient = dbUser.upcomingTasksEmailAddress || dbUser.email;
   const todayStr = new Date().toISOString().slice(0, 10);
+  const appUrl = baseUrl || process.env.APP_URL || process.env.DEVELOPMENT_APP_URL || "http://localhost:3000";
   
   const subject = `🌅 Aaj ke Tasks Summary - ${todayStr}`;
   
@@ -1251,7 +1252,7 @@ async function sendDailySummaryEmail(dbUser: any, userTasks: any[]) {
           </div>
           
           <div style="text-align: center; margin-top: 35px;">
-            <a href="${process.env.DEVELOPMENT_APP_URL || "http://localhost:3000"}" style="display: inline-block; padding: 12px 24px; background-color: #4f46e5; color: white; text-decoration: none; font-weight: bold; font-size: 14px; border-radius: 10px; box-shadow: 0 2px 4px rgba(79, 70, 229, 0.25);">
+            <a href="${appUrl}" style="display: inline-block; padding: 12px 24px; background-color: #4f46e5; color: white; text-decoration: none; font-weight: bold; font-size: 14px; border-radius: 10px; box-shadow: 0 2px 4px rgba(79, 70, 229, 0.25);">
               Open DailyFlow Workspace
             </a>
           </div>
@@ -1343,7 +1344,12 @@ app.post("/api/user/emails/test-trigger", requireAuth, syncUser, async (req: Aut
       )
     );
 
-    const result = await sendDailySummaryEmail(dbUser, userTasks);
+    // Dynamically capture current request domain/origin to ensure the button link works beautifully
+    const protocol = req.headers["x-forwarded-proto"] || req.protocol || "http";
+    const host = req.headers["x-forwarded-host"] || req.get("host") || "localhost:3000";
+    const origin = `${protocol}://${host}`;
+
+    const result = await sendDailySummaryEmail(dbUser, userTasks, origin);
     res.json({
       success: true,
       statusMessage: result.statusMessage,

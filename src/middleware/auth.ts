@@ -20,6 +20,9 @@ export interface AuthRequest extends Request {
     defaultReminder: string;
     dailyPlanningReminder: string;
     endOfDayReviewReminder: string;
+    upcomingTasksEmailEnabled: boolean;
+    upcomingTasksEmailAddress: string | null;
+    upcomingTasksEmailTime: string;
     role: string;
     adminId: number | null;
   };

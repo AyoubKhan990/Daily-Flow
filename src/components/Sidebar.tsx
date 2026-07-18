@@ -2,6 +2,7 @@ import React from 'react';
 import { 
   LayoutDashboard, 
   Sun, 
+  Moon,
   Inbox, 
   CalendarDays, 
   Calendar, 
@@ -26,7 +27,24 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentView, onViewChange, streakInfo }) => {
-  const { profile, logout } = useAuth();
+  const { profile, logout, updateProfile } = useAuth();
+
+  const isDark = profile?.theme === 'dark';
+
+  const toggleTheme = async () => {
+    try {
+      const nextTheme = isDark ? 'light' : 'dark';
+      await updateProfile({ theme: nextTheme });
+      // Apply class on document element
+      if (nextTheme === 'dark') {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    } catch (e) {
+      console.error('Failed to toggle theme', e);
+    }
+  };
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -109,6 +127,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onViewChange, str
               {profile?.email}
             </p>
           </div>
+          <button
+            id="theme-toggle-btn"
+            onClick={toggleTheme}
+            title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            className="p-1.5 text-slate-400 hover:text-indigo-500 dark:text-slate-500 dark:hover:text-amber-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors"
+          >
+            {isDark ? <Sun className="w-4 h-4 text-amber-500" /> : <Moon className="w-4 h-4 text-indigo-500" />}
+          </button>
           <button
             id="logout-btn"
             onClick={logout}

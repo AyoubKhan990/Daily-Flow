@@ -5,6 +5,7 @@ import {
   LogOut, 
   LayoutDashboard, 
   Sun, 
+  Moon,
   Inbox, 
   CalendarDays, 
   Calendar as CalendarIcon, 
@@ -47,8 +48,24 @@ import { Task, Project, Category, Template } from './types.ts';
 import { getTodayDateString, getRelativeDateString } from './utils/dateUtils.ts';
 
 function MainLayout() {
-  const { user, profile, token, loginWithGoogle, logout, refreshProfile } = useAuth();
+  const { user, profile, token, loginWithGoogle, logout, refreshProfile, updateProfile } = useAuth();
   
+  const isDark = profile?.theme === 'dark';
+
+  const toggleTheme = async () => {
+    try {
+      const nextTheme = isDark ? 'light' : 'dark';
+      await updateProfile({ theme: nextTheme });
+      if (nextTheme === 'dark') {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    } catch (e) {
+      console.error('Failed to toggle theme', e);
+    }
+  };
+
   // Navigation
   const [currentView, setCurrentView] = useState('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -672,12 +689,22 @@ function MainLayout() {
           <span className="w-7 h-7 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-extrabold text-sm">D</span>
           <span className="font-display font-black text-base tracking-tight text-slate-900 dark:text-white">DailyFlow</span>
         </div>
-        <button
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 rounded-lg"
-        >
-          {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            id="mobile-theme-toggle-btn"
+            onClick={toggleTheme}
+            title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-400 rounded-lg transition-colors"
+          >
+            {isDark ? <Sun className="w-5 h-5 text-amber-500" /> : <Moon className="w-5 h-5 text-indigo-500" />}
+          </button>
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 rounded-lg"
+          >
+            {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+        </div>
       </header>
 
       {/* Mobile drawer overlay menu */}
